@@ -3,8 +3,9 @@ package main
 import (
 	"fmt"
 	"log"
-	"strconv"
 	"syscall"
+
+	"./http"
 )
 
 // socket, accept, listen, send, recv, bind, connect, inet_addr,
@@ -48,7 +49,11 @@ type Client struct {
 }
 
 func (s *data) Send(content string, dst Client) error {
-	contentLen := len(content)
+	h := http.NewHeader()
+	h.SetVersion("1.1")
+	h.SetStatusCode(200)
+	h.AddEntity(http.ContentType, "text/html; charset=utf-8")
+	h.SetBody(content)
 	// func Sendmsg(destFD int, p, oob []byte, to Sockaddr, flags int) error
 	// destFD is the destinataire file descriptor
 	// p is the content of the message
@@ -58,7 +63,7 @@ func (s *data) Send(content string, dst Client) error {
 	// MSG_CONFIRM, MSG_DONTROUTE, MSG_DONTWAIT, MSG_EOR, MSG_MORE, MSG_NOSIGNAL, MSG_OOB
 	return syscall.Sendmsg(
 		dst.fd,
-		[]byte("HTTP/1.1 200 OK\r\nStatus: 200 OK\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Length: "+strconv.Itoa(contentLen)+"\r\n\r\n"+content),
+		h.ToByte(),
 		nil, dst.stockaddr, syscall.MSG_DONTWAIT)
 }
 
@@ -92,7 +97,7 @@ func main() {
 				fd:        nfd,
 				stockaddr: sa,
 			}
-			err = n.Send("Bonjour tous le monde", c)
+			err = n.Send("<html><header><title>This is title</title></header><body>Hello world</body></html>", c)
 			if err != nil {
 				fmt.Println("Send", err)
 			}
