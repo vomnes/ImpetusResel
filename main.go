@@ -14,15 +14,58 @@ const (
 	listenBacklog = 100
 )
 
-func main() {
-	fmt.Println("Welcome in ImpetusResel")
+type server struct {
+	fd int
+}
+
+type data struct {
+	server server
+}
+
+func (s *data) Socket() error {
+	var err error
 	// AF_INET  0x2 -> The Internet Protocol version 4 (IPv4) address family
 	// AF_INET6 0x1E -> The Internet Protocol version 6 (IPv6) address family
 	// Socket types
 	// SOCK_STREAM	1		     Stream (connection) socket for reliable, sequenced, connection oriented messages (think TCP)
 	// SOCK_DGRAM	  2		     Datagram (conn.less) socket for connection-less, unreliable messages (think UDP or UNIX connections)
 	// SOCK_RAW	    3		     Raw socket
-	socketFD, err := syscall.Socket(syscall.AF_INET, syscall.SOCK_STREAM, syscall.IPPROTO_IP)
+	s.server.fd, err = syscall.Socket(syscall.AF_INET, syscall.SOCK_STREAM, syscall.IPPROTO_IP)
+	return err
+}
+
+func (s *data) Listen() error {
+	// syscall.Listen(sockfd, backlog int) error
+	// sockfd, a valid socket descriptor
+	// backlog, an integer representing the number of pending connections that can be queued up at any one time.
+	return syscall.Listen(s.server.fd, listenBacklog)
+}
+
+// Client ...
+type Client struct {
+	fd        int
+	stockaddr syscall.Sockaddr
+}
+
+func (s *data) Send(content string, dst Client) error {
+	contentLen := len(content)
+	// func Sendmsg(destFD int, p, oob []byte, to Sockaddr, flags int) error
+	// destFD is the destinataire file descriptor
+	// p is the content of the message
+	// oob is the Out Of Band data
+	// to is the receiver socket address
+	// flags is the bitwise OR of zero or more of the following flags :
+	// MSG_CONFIRM, MSG_DONTROUTE, MSG_DONTWAIT, MSG_EOR, MSG_MORE, MSG_NOSIGNAL, MSG_OOB
+	return syscall.Sendmsg(
+		dst.fd,
+		[]byte("HTTP/1.1 200 OK\r\nStatus: 200 OK\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Length: "+strconv.Itoa(contentLen)+"\r\n\r\n"+content),
+		nil, dst.stockaddr, syscall.MSG_DONTWAIT)
+}
+
+func main() {
+	fmt.Println("Welcome in ImpetusResel")
+	n := data{}
+	err := n.Socket()
 	if err != nil {
 		log.Fatalln("Socket -", err)
 	}
@@ -30,39 +73,28 @@ func main() {
 		Port: 8084,
 		Addr: [4]byte{127, 0, 0, 1},
 	}
-	err = syscall.Bind(socketFD, server)
+	err = syscall.Bind(n.server.fd, server)
 	if err != nil {
 		log.Fatalln(fmt.Sprintf("Failed to bind to Addr: %v, Port: %d\nReason: %s", server.Addr, server.Port, err))
 	}
 	fmt.Printf("Server: Bound to addr: %v, port: %d\n", server.Addr, server.Port)
-	// syscall.Listen(sockfd, backlog int) error
-	// sockfd, a valid socket descriptor
-	// backlog, an integer representing the number of pending connections that can be queued up at any one time.
-	err = syscall.Listen(socketFD, listenBacklog)
+	err = n.Listen()
 	if err != nil {
 		log.Fatalln("Listen -", err)
 	}
 	for {
-		nfd, sa, err := syscall.Accept(socketFD)
+		nfd, sa, err := syscall.Accept(n.server.fd)
 		if err != nil {
 			fmt.Println(err)
 		} else {
 			fmt.Println("Connection to", nfd, sa)
-			content := "Hello World"
-			contentLen := len(content)
-			// func Sendmsg(destFD int, p, oob []byte, to Sockaddr, flags int) error
-			// destFD is the destinataire file descriptor
-			// p is the content of the message
-			// oob is the Out Of Band data
-			// to is the receiver socket address
-			// flags is the bitwise OR of zero or more of the following flags :
-			// MSG_CONFIRM, MSG_DONTROUTE, MSG_DONTWAIT, MSG_EOR, MSG_MORE, MSG_NOSIGNAL, MSG_OOB
-			err = syscall.Sendmsg(
-				nfd,
-				[]byte("HTTP/1.1 200 OK\r\nStatus: 200 OK\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Length: "+strconv.Itoa(contentLen)+"\r\n\r\n"+content),
-				nil, sa, syscall.MSG_DONTWAIT)
+			c := Client{
+				fd:        nfd,
+				stockaddr: sa,
+			}
+			err = n.Send("Bonjour tous le monde", c)
 			if err != nil {
-				fmt.Println("Sendmsg", err)
+				fmt.Println("Send", err)
 			}
 		}
 	}
