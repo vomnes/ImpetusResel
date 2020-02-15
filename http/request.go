@@ -2,7 +2,6 @@ package http
 
 import (
 	"fmt"
-	"net/url"
 	"strconv"
 	"strings"
 
@@ -12,6 +11,9 @@ import (
 
 // Header allows to store headers
 type Header map[string][]string
+
+// Value store the URL values from thes forms
+type Values map[string][]string
 
 // Request is the structure where the request extracted data is stored
 type Request struct {
@@ -30,8 +32,10 @@ type Request struct {
 
 	Host string
 
-	Form     url.Values
-	PostForm url.Values
+	Form        Values
+	HasForm     bool
+	PostForm    Values
+	HasPostForm bool
 }
 
 // NewRequest init a new request structure
@@ -94,21 +98,33 @@ func parseHTTPVersion(value string) (major, minor int, ok bool) {
 	return major, minor, true
 }
 
+func (r *Request) addHeader(key string, values []string) {
+	for _, value := range values {
+		r.Header[key] = append(r.Header[key], value)
+	}
+}
+
 // RequestParse extract and store the data from the request
 // in the request structure
 func (r *Request) RequestParse(headers string) error {
 	listErrors := []string{}
 	array := strings.Split(headers, "\r\n")
+
+	parts := strings.Split(headers, "\r\n\r\n")
+	fmt.Println(parts[0])
+	fmt.Println("======")
+	fmt.Println(parts[1])
 	segment := 0
 	var ok bool
 
 	for _, header := range array {
-		fmt.Println(segment, header)
+		// fmt.Println(segment, header)
 		switch segment {
 		case segmentRequest:
 			request := strings.Split(header, " ")
 			if len(request) != 3 {
-				listErrors = append(listErrors, "Invalid resquest number elements")
+				listErrors = append(listErrors, "Invalid Protocol/URL/Version format")
+				continue
 			}
 			if !validMethod(request[0]) {
 				listErrors = append(listErrors, request[0]+" is not a valid method")
@@ -128,8 +144,34 @@ func (r *Request) RequestParse(headers string) error {
 				segment = segmentBody
 				continue
 			}
+			h := strings.Split(header, ": ")
+			if len(h) != 2 {
+				listErrors = append(listErrors, "Invalid header format")
+				continue
+			}
+			if h[0] == string(ContentLength) {
+				value, err := strconv.Atoi(h[1])
+				if err == nil {
+					r.ContentLength = int64(value)
+				}
+				continue
+			}
+			if h[0] == string(Host) {
+				r.Host = h[1]
+				continue
+			}
+			if headerName(h[0]) == ContentType {
+				if strings.Contains(h[1], "application/x-www-form-urlencoded") {
+					r.HasForm = true
+				}
+				if strings.Contains(h[1], "multipart/form-data") {
+					r.HasPostForm = true
+				}
+			}
+			headerValues := strings.Split(h[1], ",")
+			r.addHeader(h[0], headerValues)
 		case segmentBody:
-
+			r.Body += header + "\n"
 		default:
 			break
 		}
