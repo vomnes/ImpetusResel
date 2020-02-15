@@ -2,7 +2,6 @@ package http
 
 import (
 	"errors"
-	"fmt"
 	"io"
 	"strconv"
 	"strings"
@@ -15,6 +14,16 @@ import (
 
 // Header allows to store headers
 type Header map[string][]string
+
+func (h *Header) AddHeader(key string, value string) {
+	(*h)[key] = append((*h)[key], value)
+}
+
+func (h *Header) AddHeaders(key string, values []string) {
+	for _, value := range values {
+		h.AddHeader(key, value)
+	}
+}
 
 // Values store the URL values from thes forms
 type Values map[string][]string
@@ -115,12 +124,6 @@ func parseHTTPVersion(value string) (major, minor int, ok bool) {
 	return major, minor, true
 }
 
-func (r *Request) addHeader(key string, values []string) {
-	for _, value := range values {
-		r.Header[key] = append(r.Header[key], value)
-	}
-}
-
 func (r *Request) parseHeaders(headers string) {
 	array := strings.Split(headers, "\r\n")
 	var ok, requestSpecCollected bool
@@ -171,7 +174,7 @@ func (r *Request) parseHeaders(headers string) {
 				}
 			}
 			headerValues := strings.Split(h[1], ",")
-			r.addHeader(h[0], headerValues)
+			r.Header.AddHeaders(h[0], headerValues)
 		}
 	}
 }
@@ -206,20 +209,54 @@ func (r *Request) getMultipartBoundaryDelimiter() string {
 	return ""
 }
 
+func extractDataFormContent(content string) string {
+	content = strings.ReplaceAll(content, "\r\n", " ")
+	content = strings.ReplaceAll(content, ":", "")
+	content = strings.ReplaceAll(content, ";", "")
+	content = strings.ReplaceAll(content, "\"", "")
+	arr := strings.Split(content, " ")
+
+	var lenItem int
+	for _, item := range arr {
+		lenItem = len(item)
+		if strings.Contains(item, "filename=") {
+			// if lenItem > len("filename=") {
+			// 	name += item[len("filename="):] + ";"
+			// }
+		} else if strings.Contains(item, "name=") {
+			if lenItem > len("name=") {
+				return item[len("name="):]
+			}
+		}
+		// if strings.Contains(item, "/") {
+		// 	name += item
+		// }
+	}
+	return ""
+}
+
 func (r *Request) parseDataForm(body string) {
-	var parts []string
+	var parts, items []string
 	var partSize int
+	// var nameItem string
 
 	delimiter := "--" + r.getMultipartBoundaryDelimiter()
 	parts = strings.Split(body, delimiter)
-	for i, part := range parts {
+	for _, part := range parts {
 		partSize = len(part)
 		// Skip part where "Content-Disposition" is not include
 		if partSize < len("Content-Disposition") {
 			continue
 		}
 		part = strings.TrimLeft(part, "\r\n")
-		fmt.Print(i, " $>"+part)
+		// Handle part
+		items = strings.Split(part, "\r\n\r\n")
+		if len(items) == 2 {
+			r.PostForm.AddValue(
+				extractDataFormContent(items[0]),
+				items[1],
+			)
+		}
 	}
 	return
 }
@@ -237,7 +274,6 @@ func (r *Request) parseBody(body string) {
 // RequestParse extract and store the data from the request
 // in the request structure
 func (r *Request) RequestParse(headers string) error {
-	fmt.Println("=============================================================")
 	const delimiter = "\r\n\r\n"
 	bodyStart := strings.Index(headers, delimiter)
 	if bodyStart == -1 {
