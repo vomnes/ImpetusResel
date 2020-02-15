@@ -1,6 +1,7 @@
 package http
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"strconv"
@@ -192,25 +193,57 @@ func (r *Request) parseForm(form string) {
 	}
 }
 
+func (r *Request) getMultipartBoundaryDelimiter() string {
+	contentType := r.Header[string(ContentType)]
+	if contentType == nil {
+		return ""
+	}
+	subpart := "boundary="
+	multipart := strings.LastIndex(contentType[0], subpart)
+	if multipart != -1 {
+		return strings.ReplaceAll(contentType[0][multipart+len(subpart):], "\"", "")
+	}
+	return ""
+}
+
+func (r *Request) parseDataForm(body string) {
+	var parts []string
+	var partSize int
+
+	delimiter := "--" + r.getMultipartBoundaryDelimiter()
+	parts = strings.Split(body, delimiter)
+	for i, part := range parts {
+		partSize = len(part)
+		// Skip part where "Content-Disposition" is not include
+		if partSize < len("Content-Disposition") {
+			continue
+		}
+		part = strings.TrimLeft(part, "\r\n")
+		fmt.Print(i, " $>"+part)
+	}
+	return
+}
+
 func (r *Request) parseBody(body string) {
 	r.Body = strings.NewReader(body)
 	if r.HasForm {
 		r.parseForm(body)
+	}
+	if r.HasPostForm {
+		r.parseDataForm(body)
 	}
 }
 
 // RequestParse extract and store the data from the request
 // in the request structure
 func (r *Request) RequestParse(headers string) error {
-	fmt.Println(headers)
 	fmt.Println("=============================================================")
-
-	segements := strings.Split(headers, "\r\n\r\n")
-	r.parseHeaders(segements[0])
-	if r.HasPostForm {
-		r.parseBody(headers)
+	const delimiter = "\r\n\r\n"
+	bodyStart := strings.Index(headers, delimiter)
+	if bodyStart == -1 {
+		return errors.New("Not a valid reader format")
 	}
-
-	fmt.Println(segements)
+	r.parseHeaders(headers[:bodyStart])
+	r.parseBody(headers[bodyStart+len(delimiter):])
 	return nil
 }
