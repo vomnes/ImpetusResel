@@ -7,7 +7,7 @@ import (
 	"strings"
 
 	"../utils"
-	"github.com/kr/pretty"
+	"github.com/kylelemons/godebug/pretty"
 )
 
 // URL Living Standard - https://url.spec.whatwg.org/#urlencoded-parsing
@@ -21,7 +21,7 @@ func (h *Header) AddHeader(key string, value string) {
 
 func (h *Header) AddHeaders(key string, values []string) {
 	for _, value := range values {
-		h.AddHeader(key, value)
+		h.AddHeader(key, strings.TrimSpace(value))
 	}
 }
 
