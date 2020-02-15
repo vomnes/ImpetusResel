@@ -22,6 +22,7 @@ type server struct {
 
 type data struct {
 	server server
+	router *Router
 }
 
 func (s *data) Socket() error {
@@ -43,18 +44,17 @@ func (s *data) Listen() error {
 	return syscall.Listen(s.server.fd, listenBacklog)
 }
 
+func (s *data) SetRouter(router *Router) {
+	s.router = router
+}
+
 // Client ...
 type Client struct {
 	fd        int
 	stockaddr syscall.Sockaddr
 }
 
-func (s *data) Send(content string, dst Client) error {
-	h := NewHeader()
-	h.SetVersion("1.1")
-	h.SetStatusCode(200)
-	h.AddEntity(ContentType, "text/plain; charset=utf-8")
-	h.SetBody(content)
+func (s *data) Send(h *Headers, dst Client) error {
 	// func Sendmsg(destFD int, p, oob []byte, to Sockaddr, flags int) error
 	// destFD is the destinataire file descriptor
 	// p is the content of the message
@@ -84,13 +84,23 @@ func (s *data) handleRoute() {
 			return
 		}
 		data := make([]byte, 8000)
-		count, err := file.Read(data)
+		_, err := file.Read(data)
 		if err != nil {
 			log.Fatal(err)
 		}
-		fmt.Printf("read %d bytes: %q\n", count, data[:count])
+
+		h := NewHeader()
+		h.SetVersion("1.1")
+		r := NewRequest()
+		r.RequestParse(string(data))
+		route := s.router.routes[r.URL]
+		if route.Handler != nil {
+			route.Handler(h, r)
+		} else {
+			s.router.defaultHandler(h, r)
+		}
 		defer file.Close()
-		err = s.Send("Bonjour tous le monde", c)
+		err = s.Send(h, c)
 		if err != nil {
 			fmt.Println("Send", err)
 		}
@@ -98,8 +108,9 @@ func (s *data) handleRoute() {
 }
 
 // ListenAndServe will launch the server on a given port
-func ListenAndServe(port int) {
+func ListenAndServe(port int, router *Router) {
 	n := data{}
+	n.SetRouter(router)
 	err := n.Socket()
 	if err != nil {
 		log.Fatalln("Socket -", err)

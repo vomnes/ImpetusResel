@@ -219,11 +219,12 @@ func extractDataFormContent(content string) string {
 	var lenItem int
 	for _, item := range arr {
 		lenItem = len(item)
-		if strings.Contains(item, "filename=") {
-			// if lenItem > len("filename=") {
-			// 	name += item[len("filename="):] + ";"
-			// }
-		} else if strings.Contains(item, "name=") {
+		// if strings.Contains(item, "filename=") {
+		// if lenItem > len("filename=") {
+		// 	name += item[len("filename="):] + ";"
+		// }
+		// } else
+		if strings.Contains(item, "name=") {
 			if lenItem > len("name=") {
 				return item[len("name="):]
 			}
