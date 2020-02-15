@@ -2,6 +2,7 @@ package http
 
 import (
 	"fmt"
+	"io"
 	"strconv"
 	"strings"
 
@@ -9,11 +10,18 @@ import (
 	"github.com/kr/pretty"
 )
 
+// URL Living Standard - https://url.spec.whatwg.org/#urlencoded-parsing
+
 // Header allows to store headers
 type Header map[string][]string
 
-// Value store the URL values from thes forms
+// Values store the URL values from thes forms
 type Values map[string][]string
+
+// AddValue append a new item to a given key in Values
+func (v *Values) AddValue(key, value string) {
+	(*v)[key] = append((*v)[key], value)
+}
 
 // Request is the structure where the request extracted data is stored
 type Request struct {
@@ -26,7 +34,7 @@ type Request struct {
 
 	Header Header
 
-	Body string
+	Body io.Reader
 
 	ContentLength int64
 
@@ -36,18 +44,26 @@ type Request struct {
 	HasForm     bool
 	PostForm    Values
 	HasPostForm bool
+
+	ParsingError []string
 }
 
 // NewRequest init a new request structure
 func NewRequest() *Request {
 	return &Request{
-		Header: Header{},
+		Header:   Header{},
+		Form:     Values{},
+		PostForm: Values{},
 	}
 }
 
 // Print print the request structure
 func (r *Request) Print() {
 	pretty.Print(r)
+}
+
+func (r *Request) pushError(err string) {
+	r.ParsingError = append(r.ParsingError, err)
 }
 
 const (
@@ -104,49 +120,34 @@ func (r *Request) addHeader(key string, values []string) {
 	}
 }
 
-// RequestParse extract and store the data from the request
-// in the request structure
-func (r *Request) RequestParse(headers string) error {
-	listErrors := []string{}
+func (r *Request) parseHeaders(headers string) {
 	array := strings.Split(headers, "\r\n")
-
-	parts := strings.Split(headers, "\r\n\r\n")
-	fmt.Println(parts[0])
-	fmt.Println("======")
-	fmt.Println(parts[1])
-	segment := 0
-	var ok bool
+	var ok, requestSpecCollected bool
 
 	for _, header := range array {
-		// fmt.Println(segment, header)
-		switch segment {
-		case segmentRequest:
+		if !requestSpecCollected {
 			request := strings.Split(header, " ")
 			if len(request) != 3 {
-				listErrors = append(listErrors, "Invalid Protocol/URL/Version format")
+				r.pushError("Invalid Protocol/URL/Version format")
 				continue
 			}
 			if !validMethod(request[0]) {
-				listErrors = append(listErrors, request[0]+" is not a valid method")
+				r.pushError(request[0] + " is not a valid method")
 			} else {
 				r.Method = request[0]
 			}
 			r.URL = request[1]
 			r.ProtoMajor, r.ProtoMinor, ok = parseHTTPVersion(request[2])
 			if !ok {
-				listErrors = append(listErrors, request[2]+" is not a valid HTTP version")
+				r.pushError(request[2] + " is not a valid HTTP version")
 			} else {
 				r.Proto = request[2]
 			}
-			segment = segmentHeaders
-		case segmentHeaders:
-			if header == "" {
-				segment = segmentBody
-				continue
-			}
+			requestSpecCollected = true
+		} else {
 			h := strings.Split(header, ": ")
 			if len(h) != 2 {
-				listErrors = append(listErrors, "Invalid header format")
+				r.pushError("Invalid header format")
 				continue
 			}
 			if h[0] == string(ContentLength) {
@@ -170,11 +171,46 @@ func (r *Request) RequestParse(headers string) error {
 			}
 			headerValues := strings.Split(h[1], ",")
 			r.addHeader(h[0], headerValues)
-		case segmentBody:
-			r.Body += header + "\n"
-		default:
-			break
 		}
 	}
+}
+
+// https://url.spec.whatwg.org/#urlencoded-parsing
+// application/x-www-form-urlencoded parsing
+func (r *Request) parseForm(form string) {
+	var nameString, valueString string
+	urlValues := strings.Split(form, "&")
+	for _, value := range urlValues {
+		keyValue := strings.Split(value, "=")
+		if len(keyValue) == 2 {
+			nameString = keyValue[0]
+			valueString = keyValue[1]
+			// Replace any 0x2B (+) in name and value with 0x20 (SP).
+			valueString = strings.ReplaceAll(valueString, "+", " ")
+			r.Form.AddValue(nameString, valueString)
+		}
+	}
+}
+
+func (r *Request) parseBody(body string) {
+	r.Body = strings.NewReader(body)
+	if r.HasForm {
+		r.parseForm(body)
+	}
+}
+
+// RequestParse extract and store the data from the request
+// in the request structure
+func (r *Request) RequestParse(headers string) error {
+	fmt.Println(headers)
+	fmt.Println("=============================================================")
+
+	segements := strings.Split(headers, "\r\n\r\n")
+	r.parseHeaders(segements[0])
+	if r.HasPostForm {
+		r.parseBody(headers)
+	}
+
+	fmt.Println(segements)
 	return nil
 }
