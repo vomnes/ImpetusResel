@@ -68,7 +68,7 @@ func (h *Headers) SetBody(content string) { h.body = content }
 // ToByte return the headers data under []byte format
 func (h Headers) ToByte() []byte {
 	var header string
-	// HTTP/1.1 200 OK\r\nStatus: 200 OK\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Length: "+strconv.Itoa(contentLen)+"\r\n\r\n"+content
+	// HTTP/1.1 200 OK\r\nStatus: 200 OK\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Length: <contentLen>\r\n\r\n<content>"
 	header += "HTTP/" + h.version + " " + h.GetStatus() + "\r\n"
 	for key, value := range h.entities {
 		header += key + ": " + value + "\r\n"

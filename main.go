@@ -12,7 +12,7 @@ func main() {
 	api.AddRoute("/bonjour", func(w *http.Headers, r *http.Request) {
 		w.SetStatusCode(200)
 		w.AddEntity(http.ContentType, "text/plain; charset=utf-8")
-		w.SetBody("Hello world" + r.URL)
+		w.SetBody("Welcome you are on this page: " + r.URL)
 	})
 	api.SetDefaultRoute(func(w *http.Headers, r *http.Request) {
 		w.SetStatusCode(404)

@@ -1,6 +1,7 @@
 package http
 
 import (
+	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -68,44 +69,51 @@ func (s *data) Send(h *Headers, dst Client) error {
 		nil, dst.stockaddr, syscall.MSG_DONTWAIT)
 }
 
+func readFromClient(fd int) (msg []byte, file *os.File, err error) {
+	file = os.NewFile(uintptr(fd), "")
+	if file == nil {
+		err = errors.New("Not a valid file descriptor")
+		return
+	}
+	msg = make([]byte, 8000)
+	_, err = file.Read(msg)
+	return
+}
+
 func (s *data) handleRoute() {
 	nfd, sa, err := syscall.Accept(s.server.fd)
 	if err != nil {
 		fmt.Println(err)
+		return
+	}
+	c := Client{
+		fd:        nfd,
+		stockaddr: sa,
+	}
+	msg, file, err := readFromClient(c.fd)
+	defer file.Close()
+	if err != nil {
+		fmt.Println("readFromClient", err)
+		return
+	}
+	h := NewHeader()
+	h.SetVersion("1.1")
+	r := NewRequest()
+	r.RequestParse(string(msg))
+	route := s.router.routes[r.URL]
+	if route.Handler != nil {
+		route.Handler(h, r)
 	} else {
-		fmt.Println("Connection to", nfd, sa)
-		c := Client{
-			fd:        nfd,
-			stockaddr: sa,
-		}
-		file := os.NewFile(uintptr(c.fd), "")
-		if file == nil {
-			fmt.Println("NewFile", err)
-			return
-		}
-		data := make([]byte, 8000)
-		_, err := file.Read(data)
-		if err != nil {
-			log.Fatal(err)
-		}
-
-		h := NewHeader()
-		h.SetVersion("1.1")
-		r := NewRequest()
-		r.RequestParse(string(data))
-		route := s.router.routes[r.URL]
-		if route.Handler != nil {
-			route.Handler(h, r)
-		} else {
-			s.router.defaultHandler(h, r)
-		}
-		defer file.Close()
-		err = s.Send(h, c)
-		if err != nil {
-			fmt.Println("Send", err)
-		}
+		s.router.defaultHandler(h, r)
+	}
+	err = s.Send(h, c)
+	if err != nil {
+		fmt.Println("Send", err)
 	}
 }
+
+// https://www.gnu.org/software/libc/manual/html_node/Sockets.html#Sockets
+// https://www.gnu.org/software/libc/manual/html_node/Connections.html
 
 // ListenAndServe will launch the server on a given port
 func ListenAndServe(port int, router *Router) {
@@ -119,6 +127,7 @@ func ListenAndServe(port int, router *Router) {
 		Port: port,
 		Addr: [4]byte{127, 0, 0, 1},
 	}
+	// Link socket to address IP
 	err = syscall.Bind(n.server.fd, server)
 	if err != nil {
 		log.Fatalln(fmt.Sprintf("Failed to bind to Addr: %v, Port: %d\nReason: %s", utils.ByteArrayJoin(server.Addr[:], "."), server.Port, err))
