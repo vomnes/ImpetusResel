@@ -7,7 +7,8 @@ import (
 	"os"
 	"syscall"
 
-	"../utils"
+	"../../net"
+	"../../utils"
 )
 
 // socket, accept, listen, send, recv, bind, connect, inet_addr,
@@ -18,7 +19,8 @@ const (
 )
 
 type server struct {
-	fd int
+	fd       int
+	addrIPv4 *syscall.SockaddrInet4
 }
 
 type data struct {
@@ -47,6 +49,21 @@ func (s *data) Listen() error {
 
 func (s *data) SetRouter(router *Router) {
 	s.router = router
+}
+
+func initSockAddr(addr string, port int) *syscall.SockaddrInet4 {
+	tmpAddr := net.ParseIP(addr)
+	if tmpAddr == nil {
+		tmpAddr = net.IP{127, 0, 0, 1}
+	}
+	return &syscall.SockaddrInet4{
+		Port: port,
+		Addr: [4]byte{tmpAddr[0], tmpAddr[1], tmpAddr[2], tmpAddr[3]},
+	}
+}
+
+func (s *data) SetSocketAddr(addr string, port int) {
+	s.server.addrIPv4 = initSockAddr(addr, port)
 }
 
 // Client ...
@@ -123,16 +140,13 @@ func ListenAndServe(port int, router *Router) {
 	if err != nil {
 		log.Fatalln("Socket -", err)
 	}
-	server := &syscall.SockaddrInet4{
-		Port: port,
-		Addr: [4]byte{127, 0, 0, 1},
-	}
+	n.SetSocketAddr("127.0.0.1", port)
 	// Link socket to address IP
-	err = syscall.Bind(n.server.fd, server)
+	err = syscall.Bind(n.server.fd, n.server.addrIPv4)
 	if err != nil {
-		log.Fatalln(fmt.Sprintf("Failed to bind to Addr: %v, Port: %d\nReason: %s", utils.ByteArrayJoin(server.Addr[:], "."), server.Port, err))
+		log.Fatalln(fmt.Sprintf("Failed to bind to Addr: %v, Port: %d\nReason: %s", utils.ByteArrayJoin(n.server.addrIPv4.Addr[:], "."), n.server.addrIPv4.Port, err))
 	}
-	fmt.Printf("Server: Bound to addr: %v, port: %d\n", utils.ByteArrayJoin(server.Addr[:], "."), server.Port)
+	fmt.Printf("Server: Bound to addr: %v, port: %d\n", utils.ByteArrayJoin(n.server.addrIPv4.Addr[:], "."), n.server.addrIPv4.Port)
 	err = n.Listen()
 	if err != nil {
 		log.Fatalln("Listen -", err)
