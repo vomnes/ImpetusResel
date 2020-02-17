@@ -72,7 +72,7 @@ type Client struct {
 	stockaddr syscall.Sockaddr
 }
 
-func (s *data) Send(h *Headers, dst Client) error {
+func (s *data) Send(h *Headers, fdClient int, addrClient syscall.Sockaddr) error {
 	// func Sendmsg(destFD int, p, oob []byte, to Sockaddr, flags int) error
 	// destFD is the destinataire file descriptor
 	// p is the content of the message
@@ -81,19 +81,23 @@ func (s *data) Send(h *Headers, dst Client) error {
 	// flags is the bitwise OR of zero or more of the following flags :
 	// MSG_CONFIRM, MSG_DONTROUTE, MSG_DONTWAIT, MSG_EOR, MSG_MORE, MSG_NOSIGNAL, MSG_OOB
 	return syscall.Sendmsg(
-		dst.fd,
+		fdClient,
 		h.ToByte(),
-		nil, dst.stockaddr, syscall.MSG_DONTWAIT)
+		nil, addrClient, syscall.MSG_DONTWAIT)
 }
 
 func readFromClient(fd int) (msg []byte, file *os.File, err error) {
+	fmt.Println("§-§")
 	file = os.NewFile(uintptr(fd), "")
 	if file == nil {
 		err = errors.New("Not a valid file descriptor")
 		return
 	}
-	msg = make([]byte, 8000)
-	_, err = file.Read(msg)
+	fmt.Println("*-*")
+	msg = make([]byte, 1024)
+	n, err := file.Read(msg)
+	fmt.Println(n, "EOF")
+	fmt.Println("$-$")
 	return
 }
 
@@ -103,66 +107,83 @@ func (s *data) run() {
 	var readFdSet syscall.FdSet
 
 	net.FDZero(&activeFdSet)
-	net.FDSet(s.server.fd, &activeFdSet)
 
 	fmt.Println(s.server.fd, "run()")
 
+	fdAddr := net.FDAddrInit()
+
 	for {
 		readFdSet = activeFdSet
+		net.FDSet(s.server.fd, &activeFdSet)
 
-		timeval := syscall.Timeval{
-			Sec:  0,
-			Usec: 0,
-		}
-		// fmt.Println("before:", s.server.fd, readFdSet)
+		fmt.Println("readFdSet", readFdSet)
+		fmt.Println("activeFdSet", activeFdSet)
+
 		// func Select(int nfds, fd_set *FdSet, fd_set *FdSet, fd_set *FdSet, timeval *Timeval) error
-		// -> timeval can't be nil
-		err := syscall.Select(s.server.fd, &activeFdSet, nil, nil, &timeval)
+		// -> ndfs : The select function checks only the first nfds file descriptors.
+		// The usual thing is to pass FD_SETSIZE as the value of this argument.
+		// -> fd_set : Data type represents file descriptor sets for the select function
+		// -> timeval : The timeout specifies the maximum time to wait. If you pass
+		// a null pointer for this argument, it means to block indefinitely until
+		// one of the file descriptors is ready.
+		// Specify zero as the time (a struct timeval containing all zeros)
+		// if you want to find out which descriptors are ready without waiting if none are ready.
+		// var timeval = syscall.Timeval{
+		// 	Sec:  0,
+		// 	Usec: 0,
+		// }
+		err := syscall.Select(syscall.FD_SETSIZE, &activeFdSet, nil, nil, nil)
 		if err != nil {
 			log.Fatal("Select ", err)
 		}
-		// fmt.Println("after:", s.server.fd, readFdSet)
-		for fd := 0; fd < net.FDSize; fd++ {
+		fmt.Println("* after:")
+		fmt.Println("readFdSet", readFdSet)
+		fmt.Println("activeFdSet", activeFdSet)
+		for fd := 0; fd < syscall.FD_SETSIZE; fd++ {
 			if net.FDIsSet(fd, &readFdSet) {
 				if fd == s.server.fd {
 					fmt.Println("a")
-					newFD, _, err := syscall.Accept(s.server.fd)
+					fmt.Println("readFdSet", readFdSet)
+					fmt.Println("activeFdSet", activeFdSet)
+					newFD, sa, err := syscall.Accept(s.server.fd)
 					if err != nil {
 						fmt.Println(err)
 						return
 					}
+					fmt.Println("-> readFdSet", readFdSet)
+					fmt.Println("-> activeFdSet", activeFdSet)
 					net.FDSet(newFD, &activeFdSet)
+					fdAddr.Set(newFD, sa)
 				} else {
-					fmt.Println("b")
-					// c := Client{
-					// 	fd:        nfd,
-					// 	stockaddr: sa,
-					// }
-					msg, file, err := readFromClient(fd)
+					fmt.Println("$ Start", readFdSet)
+					msg, _, _ := readFromClient(fd)
 					if err != nil {
 						fmt.Println("readFromClient", err)
 						return
 					}
 					fmt.Println(string(msg))
-					file.Close()
-					net.FDClr(fd, &readFdSet)
+					h := NewHeader()
+					h.SetVersion("1.1")
+					r := NewRequest()
+					r.RequestParse(string(msg))
+					route := s.router.routes[r.URL]
+					if route.Handler != nil {
+						route.Handler(h, r)
+					} else {
+						s.router.defaultHandler(h, r)
+					}
+					err = s.Send(h, fd, fdAddr.Get(fd))
+					if err != nil {
+						fmt.Println("Send", err)
+					}
+					// file.Close()
+					net.FDClr(fd, &activeFdSet)
+					fmt.Println("*> Done", readFdSet)
+					fdAddr.Clr(fd)
+					// return
 				}
 			}
 		}
-		// h := NewHeader()
-		// h.SetVersion("1.1")
-		// r := NewRequest()
-		// r.RequestParse(string(msg))
-		// route := s.router.routes[r.URL]
-		// if route.Handler != nil {
-		// 	route.Handler(h, r)
-		// } else {
-		// 	s.router.defaultHandler(h, r)
-		// }
-		// err = s.Send(h, c)
-		// if err != nil {
-		// 	fmt.Println("Send", err)
-		// }
 	}
 }
 
