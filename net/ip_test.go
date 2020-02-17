@@ -17,7 +17,7 @@ var IP4Tests = []struct {
 func TestParseIP(t *testing.T) {
 	for _, tt := range IP4Tests {
 		actual := ParseIP(tt.str)
-		if bytes.Compare(actual, tt.expected) != 0 {
+		if !bytes.Equal(actual, tt.expected) {
 			t.Errorf("ParseIP(%s): expect [% x], has [% x] - Test type: \033[31m%s\033[0m",
 				tt.str, tt.expected, actual, tt.testContent)
 		}

@@ -23,30 +23,6 @@ type server struct {
 	addrIPv4 *syscall.SockaddrInet4
 }
 
-// FdSet -> [32]int32
-// Max FD = 1024 = 32x32
-var fdSet syscall.FdSet
-
-// FDZero set to zero the fdSet
-func FDZero(p *syscall.FdSet) {
-	p.Bits = [32]int32{}
-}
-
-// FDSet actives a given bit of fdSet
-func FDSet(fd int, p *syscall.FdSet) {
-	p.Bits[fd/32] |= (1 << (uint(fd) % 32))
-}
-
-// FDClr actives a given bit of fdSet
-func FDClr(fd int, p *syscall.FdSet) {
-	p.Bits[fd/32] &^= (1 << (uint(fd) % 32))
-}
-
-// FDIsSet return true if the given fd is set
-func FDIsSet(fd int, p *syscall.FdSet) bool {
-	return p.Bits[fd/32]&(1<<(uint(fd)%32)) == 1
-}
-
 type data struct {
 	server server
 	router *Router
@@ -121,40 +97,79 @@ func readFromClient(fd int) (msg []byte, file *os.File, err error) {
 	return
 }
 
-func (s *data) handleRoute() {
-	nfd, sa, err := syscall.Accept(s.server.fd)
-	if err != nil {
-		fmt.Println(err)
-		return
-	}
-	c := Client{
-		fd:        nfd,
-		stockaddr: sa,
-	}
-	msg, file, err := readFromClient(c.fd)
-	defer file.Close()
-	if err != nil {
-		fmt.Println("readFromClient", err)
-		return
-	}
-	h := NewHeader()
-	h.SetVersion("1.1")
-	r := NewRequest()
-	r.RequestParse(string(msg))
-	route := s.router.routes[r.URL]
-	if route.Handler != nil {
-		route.Handler(h, r)
-	} else {
-		s.router.defaultHandler(h, r)
-	}
-	err = s.Send(h, c)
-	if err != nil {
-		fmt.Println("Send", err)
+var activeFdSet syscall.FdSet
+
+func (s *data) run() {
+	var readFdSet syscall.FdSet
+
+	net.FDZero(&activeFdSet)
+	net.FDSet(s.server.fd, &activeFdSet)
+
+	fmt.Println(s.server.fd, "run()")
+
+	for {
+		readFdSet = activeFdSet
+
+		timeval := syscall.Timeval{
+			Sec:  0,
+			Usec: 0,
+		}
+		// fmt.Println("before:", s.server.fd, readFdSet)
+		// func Select(int nfds, fd_set *FdSet, fd_set *FdSet, fd_set *FdSet, timeval *Timeval) error
+		// -> timeval can't be nil
+		err := syscall.Select(s.server.fd, &activeFdSet, nil, nil, &timeval)
+		if err != nil {
+			log.Fatal("Select ", err)
+		}
+		// fmt.Println("after:", s.server.fd, readFdSet)
+		for fd := 0; fd < net.FDSize; fd++ {
+			if net.FDIsSet(fd, &readFdSet) {
+				if fd == s.server.fd {
+					fmt.Println("a")
+					newFD, _, err := syscall.Accept(s.server.fd)
+					if err != nil {
+						fmt.Println(err)
+						return
+					}
+					net.FDSet(newFD, &activeFdSet)
+				} else {
+					fmt.Println("b")
+					// c := Client{
+					// 	fd:        nfd,
+					// 	stockaddr: sa,
+					// }
+					msg, file, err := readFromClient(fd)
+					if err != nil {
+						fmt.Println("readFromClient", err)
+						return
+					}
+					fmt.Println(string(msg))
+					file.Close()
+					net.FDClr(fd, &readFdSet)
+				}
+			}
+		}
+		// h := NewHeader()
+		// h.SetVersion("1.1")
+		// r := NewRequest()
+		// r.RequestParse(string(msg))
+		// route := s.router.routes[r.URL]
+		// if route.Handler != nil {
+		// 	route.Handler(h, r)
+		// } else {
+		// 	s.router.defaultHandler(h, r)
+		// }
+		// err = s.Send(h, c)
+		// if err != nil {
+		// 	fmt.Println("Send", err)
+		// }
 	}
 }
 
 // https://www.gnu.org/software/libc/manual/html_node/Sockets.html#Sockets
 // https://www.gnu.org/software/libc/manual/html_node/Connections.html
+
+// https://www.gnu.org/software/libc/manual/html_node/Server-Example.html
 
 // ListenAndServe will launch the server on a given port
 func ListenAndServe(port int, router *Router) {
@@ -175,9 +190,7 @@ func ListenAndServe(port int, router *Router) {
 	if err != nil {
 		log.Fatalln("Listen -", err)
 	}
-	for {
-		n.handleRoute()
-	}
+	n.run()
 }
 
 // // func SetsockoptInet4Addr(fd, level, opt int, value [4]byte) error

@@ -16,7 +16,7 @@ func parseIPv4(s string) IP {
 	}
 	for i := 0; i < len(bytesStr); i++ {
 		n, err := strconv.Atoi(bytesStr[i])
-		if err != nil || n > 0xFF {
+		if err != nil || n > 0xFF || n < 0 {
 			return nil
 		}
 		ip[i] = byte(n)
