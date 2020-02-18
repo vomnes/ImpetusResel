@@ -5,7 +5,8 @@ import (
 	"fmt"
 	"log"
 	"os"
-	"syscall"
+
+	"golang.org/x/sys/unix"
 
 	"../../net"
 	"../../utils"
@@ -20,7 +21,7 @@ const (
 
 type server struct {
 	fd       int
-	addrIPv4 *syscall.SockaddrInet4
+	addrIPv4 *unix.SockaddrInet4
 }
 
 type data struct {
@@ -36,27 +37,27 @@ func (s *data) Socket() error {
 	// SOCK_STREAM	1		     Stream (connection) socket for reliable, sequenced, connection oriented messages (think TCP)
 	// SOCK_DGRAM	  2		     Datagram (conn.less) socket for connection-less, unreliable messages (think UDP or UNIX connections)
 	// SOCK_RAW	    3		     Raw socket
-	s.server.fd, err = syscall.Socket(syscall.AF_INET, syscall.SOCK_STREAM, syscall.IPPROTO_IP)
+	s.server.fd, err = unix.Socket(unix.AF_INET, unix.SOCK_STREAM, unix.IPPROTO_IP)
 	return err
 }
 
 func (s *data) Listen() error {
-	// syscall.Listen(sockfd, backlog int) error
+	// unix.Listen(sockfd, backlog int) error
 	// sockfd, a valid socket descriptor
 	// backlog, an integer representing the number of pending connections that can be queued up at any one time.
-	return syscall.Listen(s.server.fd, listenBacklog)
+	return unix.Listen(s.server.fd, listenBacklog)
 }
 
 func (s *data) SetRouter(router *Router) {
 	s.router = router
 }
 
-func initSockAddr(addr string, port int) *syscall.SockaddrInet4 {
+func initSockAddr(addr string, port int) *unix.SockaddrInet4 {
 	tmpAddr := net.ParseIP(addr)
 	if tmpAddr == nil {
 		tmpAddr = net.IP{127, 0, 0, 1}
 	}
-	return &syscall.SockaddrInet4{
+	return &unix.SockaddrInet4{
 		Port: port,
 		Addr: [4]byte{tmpAddr[0], tmpAddr[1], tmpAddr[2], tmpAddr[3]},
 	}
@@ -69,10 +70,10 @@ func (s *data) SetSocketAddr(addr string, port int) {
 // Client ...
 type Client struct {
 	fd        int
-	stockaddr syscall.Sockaddr
+	stockaddr unix.Sockaddr
 }
 
-func (s *data) Send(h *Headers, fdClient int, addrClient syscall.Sockaddr) error {
+func (s *data) Send(h *Headers, fdClient int, addrClient unix.Sockaddr) error {
 	// func Sendmsg(destFD int, p, oob []byte, to Sockaddr, flags int) error
 	// destFD is the destinataire file descriptor
 	// p is the content of the message
@@ -80,10 +81,10 @@ func (s *data) Send(h *Headers, fdClient int, addrClient syscall.Sockaddr) error
 	// to is the receiver socket address
 	// flags is the bitwise OR of zero or more of the following flags :
 	// MSG_CONFIRM, MSG_DONTROUTE, MSG_DONTWAIT, MSG_EOR, MSG_MORE, MSG_NOSIGNAL, MSG_OOB
-	return syscall.Sendmsg(
+	return unix.Sendmsg(
 		fdClient,
 		h.ToByte(),
-		nil, addrClient, syscall.MSG_DONTWAIT)
+		nil, addrClient, unix.MSG_DONTWAIT)
 }
 
 func readFromClient(fd int) (msg []byte, file *os.File, err error) {
@@ -101,23 +102,17 @@ func readFromClient(fd int) (msg []byte, file *os.File, err error) {
 	return
 }
 
-var activeFdSet syscall.FdSet
+var activeFdSet unix.FdSet
 
 func (s *data) run() {
-	var readFdSet syscall.FdSet
+	var readFdSet unix.FdSet
 
 	net.FDZero(&activeFdSet)
-
-	fmt.Println(s.server.fd, "run()")
-
 	fdAddr := net.FDAddrInit()
 
 	for {
 		readFdSet = activeFdSet
 		net.FDSet(s.server.fd, &activeFdSet)
-
-		fmt.Println("readFdSet", readFdSet)
-		fmt.Println("activeFdSet", activeFdSet)
 
 		// func Select(int nfds, fd_set *FdSet, fd_set *FdSet, fd_set *FdSet, timeval *Timeval) error
 		// -> ndfs : The select function checks only the first nfds file descriptors.
@@ -128,45 +123,45 @@ func (s *data) run() {
 		// one of the file descriptors is ready.
 		// Specify zero as the time (a struct timeval containing all zeros)
 		// if you want to find out which descriptors are ready without waiting if none are ready.
-		// var timeval = syscall.Timeval{
+		// var timeval = unix.Timeval{
 		// 	Sec:  0,
 		// 	Usec: 0,
 		// }
-		err := syscall.Select(syscall.FD_SETSIZE, &activeFdSet, nil, nil, nil)
+		err := unix.Select(unix.FD_SETSIZE, &activeFdSet, nil, nil, nil)
 		if err != nil {
 			log.Fatal("Select ", err)
 		}
-		fmt.Println("* after:")
-		fmt.Println("readFdSet", readFdSet)
-		fmt.Println("activeFdSet", activeFdSet)
-		for fd := 0; fd < syscall.FD_SETSIZE; fd++ {
+		for fd := 0; fd < unix.FD_SETSIZE; fd++ {
 			if net.FDIsSet(fd, &readFdSet) {
 				if fd == s.server.fd {
-					fmt.Println("a")
-					fmt.Println("readFdSet", readFdSet)
-					fmt.Println("activeFdSet", activeFdSet)
-					newFD, sa, err := syscall.Accept(s.server.fd)
+					fmt.Println(fd, "a.1")
+					newFD, sa, err := unix.Accept(s.server.fd)
 					if err != nil {
-						fmt.Println(err)
+						fmt.Println("Accept", err)
 						return
 					}
-					fmt.Println("-> readFdSet", readFdSet)
-					fmt.Println("-> activeFdSet", activeFdSet)
+					fmt.Println(fd, "a.2", newFD, sa, err)
 					net.FDSet(newFD, &activeFdSet)
 					fdAddr.Set(newFD, sa)
+					fmt.Println(fd, "a.3")
 				} else {
-					fmt.Println("$ Start", readFdSet)
-					msg, _, _ := readFromClient(fd)
+					fmt.Println(fd, "b.1")
+					msg, file, err := readFromClient(fd)
 					if err != nil {
-						fmt.Println("readFromClient", err)
-						return
+						fmt.Println(fd, "b.1.11")
+						net.FDClr(fd, &activeFdSet)
+						fdAddr.Clr(fd)
+						file.Close()
+						continue
 					}
+					fmt.Println(fd, "b.1.1")
 					fmt.Println(string(msg))
 					h := NewHeader()
 					h.SetVersion("1.1")
 					r := NewRequest()
 					r.RequestParse(string(msg))
 					route := s.router.routes[r.URL]
+					fmt.Println(fd, "b.2")
 					if route.Handler != nil {
 						route.Handler(h, r)
 					} else {
@@ -176,11 +171,10 @@ func (s *data) run() {
 					if err != nil {
 						fmt.Println("Send", err)
 					}
-					// file.Close()
+					file.Close()
 					net.FDClr(fd, &activeFdSet)
-					fmt.Println("*> Done", readFdSet)
 					fdAddr.Clr(fd)
-					// return
+					fmt.Println(fd, "b.3")
 				}
 			}
 		}
@@ -202,7 +196,7 @@ func ListenAndServe(port int, router *Router) {
 	}
 	n.SetSocketAddr("127.0.0.1", port)
 	// Link socket to address IP
-	err = syscall.Bind(n.server.fd, n.server.addrIPv4)
+	err = unix.Bind(n.server.fd, n.server.addrIPv4)
 	if err != nil {
 		log.Fatalln(fmt.Sprintf("Failed to bind to Addr: %v, Port: %d\nReason: %s", utils.ByteArrayJoin(n.server.addrIPv4.Addr[:], "."), n.server.addrIPv4.Port, err))
 	}
@@ -217,7 +211,7 @@ func ListenAndServe(port int, router *Router) {
 // // func SetsockoptInet4Addr(fd, level, opt int, value [4]byte) error
 // // level argument specifies the protocol level at which the option resides
 // // option_name argument specifies a single option to set. The option_name argument and any specified options are passed uninterpreted to the appropriate protocol module for interpretations
-// err = syscall.SetsockoptInet4Addr(socketFD, syscall.IPPROTO_IP, syscall.SO_REUSEADDR, [4]byte{78, 238, 249, 32})
+// err = unix.SetsockoptInet4Addr(socketFD, unix.IPPROTO_IP, unix.SO_REUSEADDR, [4]byte{78, 238, 249, 32})
 // if err != nil {
 // 	log.Fatalln("SetsockoptInet4Addr", err)
 // }
