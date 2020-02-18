@@ -13,12 +13,11 @@ func main() {
 		w.SetStatusCode(200)
 		w.AddEntity(http.ContentType, "text/plain; charset=utf-8")
 		w.SetBody("Welcome you are on this page: " + r.URL)
-		// time.Sleep(20 * time.Second)
 	})
 	api.SetDefaultRoute(func(w *http.Headers, r *http.Request) {
 		w.SetStatusCode(404)
 		w.AddEntity(http.ContentType, "text/plain; charset=utf-8")
 		w.SetBody("Page not found\n")
 	})
-	http.ListenAndServe(8084, api)
+	http.ListenAndServe(8085, api)
 }

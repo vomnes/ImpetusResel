@@ -1,10 +1,8 @@
 package http
 
 import (
-	"errors"
 	"fmt"
 	"log"
-	"os"
 
 	"golang.org/x/sys/unix"
 
@@ -87,32 +85,17 @@ func (s *data) Send(h *Headers, fdClient int, addrClient unix.Sockaddr) error {
 		nil, addrClient, unix.MSG_DONTWAIT)
 }
 
-func readFromClient(fd int) (msg []byte, file *os.File, err error) {
-	fmt.Println("§-§")
-	file = os.NewFile(uintptr(fd), "")
-	if file == nil {
-		err = errors.New("Not a valid file descriptor")
-		return
-	}
-	fmt.Println("*-*")
-	msg = make([]byte, 1024)
-	n, err := file.Read(msg)
-	fmt.Println(n, "EOF")
-	fmt.Println("$-$")
-	return
-}
-
 var activeFdSet unix.FdSet
 
 func (s *data) run() {
 	var readFdSet unix.FdSet
 
 	net.FDZero(&activeFdSet)
+	net.FDSet(s.server.fd, &activeFdSet)
 	fdAddr := net.FDAddrInit()
 
 	for {
 		readFdSet = activeFdSet
-		net.FDSet(s.server.fd, &activeFdSet)
 
 		// func Select(int nfds, fd_set *FdSet, fd_set *FdSet, fd_set *FdSet, timeval *Timeval) error
 		// -> ndfs : The select function checks only the first nfds file descriptors.
@@ -127,41 +110,39 @@ func (s *data) run() {
 		// 	Sec:  0,
 		// 	Usec: 0,
 		// }
-		err := unix.Select(unix.FD_SETSIZE, &activeFdSet, nil, nil, nil)
+		err := unix.Select(unix.FD_SETSIZE, &readFdSet, nil, nil, nil)
 		if err != nil {
 			log.Fatal("Select ", err)
 		}
 		for fd := 0; fd < unix.FD_SETSIZE; fd++ {
 			if net.FDIsSet(fd, &readFdSet) {
 				if fd == s.server.fd {
-					fmt.Println(fd, "a.1")
 					newFD, sa, err := unix.Accept(s.server.fd)
 					if err != nil {
 						fmt.Println("Accept", err)
 						return
 					}
-					fmt.Println(fd, "a.2", newFD, sa, err)
+					// == Add new connection fd == //
 					net.FDSet(newFD, &activeFdSet)
 					fdAddr.Set(newFD, sa)
-					fmt.Println(fd, "a.3")
 				} else {
-					fmt.Println(fd, "b.1")
-					msg, file, err := readFromClient(fd)
+					msg := make([]byte, 1024)
+					sizeMsg, _, err := unix.Recvfrom(fd, msg, 0)
 					if err != nil {
-						fmt.Println(fd, "b.1.11")
 						net.FDClr(fd, &activeFdSet)
 						fdAddr.Clr(fd)
-						file.Close()
 						continue
 					}
-					fmt.Println(fd, "b.1.1")
-					fmt.Println(string(msg))
+					saFrom := fdAddr.Get(fd).(*unix.SockaddrInet4)
+					fmt.Printf("%d byte read from %d:%d on socket %d\n",
+						sizeMsg, saFrom.Addr, saFrom.Port, fd)
+					// == Parse recv message - HTTP Type == //
 					h := NewHeader()
 					h.SetVersion("1.1")
 					r := NewRequest()
 					r.RequestParse(string(msg))
+					fmt.Println("Message:", r.Method, r.URL)
 					route := s.router.routes[r.URL]
-					fmt.Println(fd, "b.2")
 					if route.Handler != nil {
 						route.Handler(h, r)
 					} else {
@@ -171,10 +152,9 @@ func (s *data) run() {
 					if err != nil {
 						fmt.Println("Send", err)
 					}
-					file.Close()
+					unix.Close(fd)
 					net.FDClr(fd, &activeFdSet)
 					fdAddr.Clr(fd)
-					fmt.Println(fd, "b.3")
 				}
 			}
 		}
