@@ -1,13 +1,26 @@
 package http
 
 import (
+	"bytes"
 	"errors"
-	"io"
 	"strconv"
 	"strings"
 
 	"../../utils"
 	"github.com/kylelemons/godebug/pretty"
+)
+
+var (
+	METHODS = []string{
+		"OPTIONS", // Section 9.2
+		"GET",     // Section ^ + 0.1
+		"HEAD",
+		"POST",
+		"PUT",
+		"DELETE",
+		"TRACE",
+		"CONNECT",
+	}
 )
 
 // URL Living Standard - https://url.spec.whatwg.org/#urlencoded-parsing
@@ -23,6 +36,11 @@ func (h *Header) AddHeaders(key string, values []string) {
 	for _, value := range values {
 		h.AddHeader(key, strings.TrimSpace(value))
 	}
+}
+
+// IsSet return true if the key has at least a value
+func (h Header) IsSet(key string) bool {
+	return len(h[key]) != 0
 }
 
 // Values store the URL values from thes forms
@@ -44,7 +62,7 @@ type Request struct {
 
 	Header Header
 
-	Body io.Reader
+	Body []byte
 
 	ContentLength int64
 
@@ -58,14 +76,42 @@ type Request struct {
 	ParsingError []string
 }
 
-// NewRequest init a new request structure
-func NewRequest() *Request {
+// InitRequest init a new request structure
+func InitRequest() *Request {
 	return &Request{
 		Header:   Header{},
 		Form:     Values{},
 		PostForm: Values{},
 	}
 }
+
+// Bytes returns the request under HTTP format in []byte
+func (r *Request) Bytes() []byte {
+	var buf bytes.Buffer
+
+	buf.WriteString(r.Method + " " + r.URL + " " + r.Proto + "\r\n")
+	buf.WriteString("Host: " + r.Host + "\r\n")
+	buf.WriteString("User-Agent: Go\r\n")
+	buf.WriteString("Accept: */*\r\n")
+	for key, values := range r.Header {
+		buf.WriteString(key + ": ")
+		for i, value := range values {
+			buf.WriteString(value + ",")
+			if i < len(values)-1 {
+				buf.WriteString(value + ",")
+			}
+		}
+		buf.WriteString("\r\n")
+	}
+	buf.WriteString(string(ContentLength) + ": " + strconv.Itoa(len(r.Body)) + "\r\n\r\n")
+	buf.Write(r.Body)
+	return buf.Bytes()
+}
+
+// > GET /books/v1/volumes?q=isbn:0747532699 HTTP/2
+// > Host: www.googleapis.com
+// > User-Agent: curl/7.54.0
+// > Accept: */*
 
 // Print print the request structure
 func (r *Request) Print() {
@@ -83,17 +129,7 @@ const (
 )
 
 func validMethod(method string) bool {
-	validMethods := []string{
-		"OPTIONS", // Section 9.2
-		"GET",     // Section ^ + 0.1
-		"HEAD",
-		"POST",
-		"PUT",
-		"DELETE",
-		"TRACE",
-		"CONNECT",
-	}
-	return utils.StringInArray(method, validMethods)
+	return utils.StringInArray(method, METHODS)
 }
 
 // ParseHTTPVersion parses a HTTP version string. (src: net/http/request.go)
@@ -263,7 +299,7 @@ func (r *Request) parseDataForm(body string) {
 }
 
 func (r *Request) parseBody(body string) {
-	r.Body = strings.NewReader(body)
+	r.Body = []byte(body)
 	if r.HasForm {
 		r.parseForm(body)
 	}

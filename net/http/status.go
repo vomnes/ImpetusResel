@@ -4,6 +4,8 @@
 
 package http
 
+import "strconv"
+
 // HTTP status codes as registered with IANA.
 // See: https://www.iana.org/assignments/http-status-codes/http-status-codes.xhtml
 const (
@@ -149,4 +151,9 @@ var statusText = map[int]string{
 // string if the code is unknown.
 func StatusText(code int) string {
 	return statusText[code]
+}
+
+// StatusString return the status code and status text under a string format
+func StatusString(code int) string {
+	return strconv.Itoa(code) + " " + StatusText(code)
 }

@@ -42,16 +42,16 @@ func (s *server) run() {
 			// == Parse recv message - HTTP Type == //
 			h := NewHeader()
 			h.SetVersion("1.1")
-			r := NewRequest()
+			r := InitRequest()
 			r.RequestParse(string(msg))
 			fmt.Println("Message:", r.Method, r.URL)
 			route := s.router.routes[r.URL]
 			if route.Handler != nil {
-				route.Handler(h, r)
+				route.Handler(*h, r)
 			} else {
-				s.router.defaultHandler(h, r)
+				s.router.defaultHandler(*h, r)
 			}
-			err = c.Write(h.ToByte())
+			err = c.Write(h.Bytes())
 			if err != nil {
 				fmt.Println("Write:", err)
 				c.Close()

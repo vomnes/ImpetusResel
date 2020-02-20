@@ -46,11 +46,6 @@ func NewHeader() *Headers {
 	}
 }
 
-// GetStatus return the status code and status text under a string format
-func (h Headers) GetStatus() string {
-	return strconv.Itoa(h.statusCode) + " " + StatusText(h.statusCode)
-}
-
 // AddEntity add a new header entity
 func (h *Headers) AddEntity(key headerName, value string) {
 	h.entities[string(key)] = value
@@ -65,11 +60,11 @@ func (h *Headers) SetStatusCode(code int) { h.statusCode = code }
 // SetBody set the body content in headers
 func (h *Headers) SetBody(content string) { h.body = content }
 
-// ToByte return the headers data under []byte format
-func (h Headers) ToByte() []byte {
+// Bytes return the headers data under []byte format
+func (h Headers) Bytes() []byte {
 	var header string
 	// HTTP/1.1 200 OK\r\nStatus: 200 OK\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Length: <contentLen>\r\n\r\n<content>"
-	header += "HTTP/" + h.version + " " + h.GetStatus() + "\r\n"
+	header += "HTTP/" + h.version + " " + StatusString(h.statusCode) + "\r\n"
 	for key, value := range h.entities {
 		header += key + ": " + value + "\r\n"
 	}

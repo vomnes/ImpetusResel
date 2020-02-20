@@ -1,6 +1,6 @@
 package http
 
-type Handler func(w *Headers, r *Request)
+type Handler func(w Headers, r *Request)
 
 type Route struct {
 	Handler Handler
@@ -16,7 +16,7 @@ type Router struct {
 func NewRouter() *Router {
 	return &Router{
 		routes:         map[string]Route{},
-		defaultHandler: func(w *Headers, r *Request) {},
+		defaultHandler: func(w Headers, r *Request) {},
 	}
 }
 
