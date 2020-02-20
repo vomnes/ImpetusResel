@@ -2,8 +2,9 @@ package net
 
 import (
 	"fmt"
-	"syscall"
 	"testing"
+
+	"golang.org/x/sys/unix"
 )
 
 func checkDiff(actual, expected [32]int32) string {
@@ -16,7 +17,7 @@ func checkDiff(actual, expected [32]int32) string {
 }
 
 func TestFD(t *testing.T) {
-	var activeFdSet syscall.FdSet
+	var activeFdSet unix.FdSet
 	FDZero(&activeFdSet)
 	FDSet(3, &activeFdSet)
 	expected := [32]int32{
