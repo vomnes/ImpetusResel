@@ -34,23 +34,12 @@ type data struct {
 
 func (s *data) Socket() error {
 	var err error
-	// func Socket(domain, typ, proto int) (fd int, err error)
 	// * Socket will return the server socket file descriptor
-	// Domaine type:
-	// AF_INET  0x2 -> The Internet Protocol version 4 (IPv4) address family
-	// AF_INET6 0x1E -> The Internet Protocol version 6 (IPv6) address family
-	// Socket types:
-	// SOCK_STREAM	1		     Stream (connection) socket for reliable, sequenced, connection oriented messages (think TCP)
-	// SOCK_DGRAM	  2		     Datagram (conn.less) socket for connection-less, unreliable messages (think UDP or UNIX connections)
-	// SOCK_RAW	    3		     Raw socket
-	// Protocol type:
-	// IPPROTO_IP -> Level IP
 	s.server.fd, err = unix.Socket(unix.AF_INET, unix.SOCK_STREAM, unix.IPPROTO_IP)
 	return err
 }
 
 func (s *data) Listen() error {
-	// func Listen(sockfd int, backlog int) (err error)
 	// * Listen will set sockfd as a passive socket ready to accept
 	// incoming connection request
 	return unix.Listen(s.server.fd, listenBacklog)
@@ -82,14 +71,7 @@ type Client struct {
 }
 
 func (s *data) Send(h *Headers, fdClient int, addrClient unix.Sockaddr) error {
-	// func Sendmsg(dstFD int, p, oob []byte, to Sockaddr, flags int) error
 	// * Sendmsg will send a message on the socket connection
-	// dstFD is the destinataire file descriptor
-	// msg is the content of the message
-	// oob is the Out Of Band data
-	// to is the receiver socket address
-	// flags is the bitwise OR of zero or more of the following flags :
-	// MSG_CONFIRM, MSG_DONTROUTE, MSG_DONTWAIT, MSG_EOR, MSG_MORE, MSG_NOSIGNAL, MSG_OOB
 	return unix.Sendmsg(
 		fdClient,
 		h.ToByte(),
@@ -108,21 +90,8 @@ func (s *data) run() {
 	for {
 		tmpFdSet = activeFdSet
 
-		// func Select(int nfds, fd_set *FdSet, fd_set *FdSet, fd_set *FdSet, timeval *Timeval) error
 		// * Select will disable in the FdSet copy the FDs that
 		// are not yet ready to be read
-		// -> ndfs : The select function checks only the first nfds file descriptors.
-		// The usual thing is to pass FD_SETSIZE as the value of this argument.
-		// -> fd_set : Data type represents file descriptor sets for the select function
-		// -> timeval : The timeout specifies the maximum time to wait. If you pass
-		// a null pointer for this argument, it means to block indefinitely until
-		// one of the file descriptors is ready.
-		// Specify zero as the time (a struct timeval containing all zeros)
-		// if you want to find out which descriptors are ready without waiting if none are ready.
-		// var timeval = unix.Timeval{
-		// 	Sec:  0,
-		// 	Usec: 0,
-		// }
 		err := unix.Select(unix.FD_SETSIZE, &tmpFdSet, nil, nil, nil)
 		if err != nil {
 			log.Fatal("Select ", err)
@@ -130,7 +99,6 @@ func (s *data) run() {
 		for fd := 0; fd < unix.FD_SETSIZE; fd++ {
 			if net.FDIsSet(fd, &tmpFdSet) {
 				if fd == s.server.fd {
-					// func Accept(fd int) (nfd int, sa Sockaddr, err error)
 					// * Accept extracts the first connection request on the queue of
 					// pending connections for the listening socket, sockfd, creates a new
 					// connected socket, and returns a new file descriptor referring
@@ -145,7 +113,6 @@ func (s *data) run() {
 					fdAddr.Set(newFD, sa)
 				} else {
 					msg := make([]byte, 1024)
-					// func Recvfrom(fd int, msg []byte, flags int) (n int, from Sockaddr, err error)
 					// * Recvfrom will read the client fd and store the data in msg
 					// Do not forger to close the fd after
 					sizeMsg, _, err := unix.Recvfrom(fd, msg, 0)
@@ -170,14 +137,7 @@ func (s *data) run() {
 					} else {
 						s.router.defaultHandler(h, r)
 					}
-					// func Sendmsg(dstFD int, p, oob []byte, to Sockaddr, flags int) error
 					// * Sendmsg will send a message on the socket connection
-					// dstFD is the destinataire file descriptor
-					// msg is the content of the message
-					// oob is the Out Of Band data
-					// to is the receiver socket address
-					// flags is the bitwise OR of zero or more of the following flags :
-					// MSG_CONFIRM, MSG_DONTROUTE, MSG_DONTWAIT, MSG_EOR, MSG_MORE, MSG_NOSIGNAL, MSG_OOB
 					err = s.Send(h, fd, fdAddr.Get(fd))
 					if err != nil {
 						fmt.Println("Send", err)
@@ -200,9 +160,7 @@ func ListenAndServe(port int, router *Router) {
 		log.Fatalln("Socket -", err)
 	}
 	n.SetSocketAddr("127.0.0.1", port)
-	// func Bind(fd int, sa Sockaddr) (err error)
 	// * Bind will link a socket file descriptor to a socket address
-	// Sockaddr is of type interface{}
 	err = unix.Bind(n.server.fd, n.server.addrIPv4)
 	if err != nil {
 		log.Fatalln(fmt.Sprintf("Failed to bind to Addr: %v, Port: %d\nReason: %s", utils.ByteArrayJoin(n.server.addrIPv4.Addr[:], "."), n.server.addrIPv4.Port, err))
