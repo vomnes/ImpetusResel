@@ -2,12 +2,8 @@ package http
 
 import (
 	"fmt"
-	"log"
-
-	"golang.org/x/sys/unix"
 
 	"../../net"
-	"../../utils"
 )
 
 // socket, accept, listen, send, recv, bind, connect, inet_addr,
@@ -18,159 +14,70 @@ import (
 // https://www.gnu.org/software/libc/manual/html_node/Server-Example.html
 // https://www.tenouk.com/Module41.html
 
-const (
-	listenBacklog = 100
-)
-
 type server struct {
-	fd       int
-	addrIPv4 *unix.SockaddrInet4
-}
-
-type data struct {
-	server server
+	socket net.TCPServer
 	router *Router
 }
 
-func (s *data) Socket() error {
-	var err error
-	// * Socket will return the server socket file descriptor
-	s.server.fd, err = unix.Socket(unix.AF_INET, unix.SOCK_STREAM, unix.IPPROTO_IP)
-	return err
-}
-
-func (s *data) Listen() error {
-	// * Listen will set sockfd as a passive socket ready to accept
-	// incoming connection request
-	return unix.Listen(s.server.fd, listenBacklog)
-}
-
-func (s *data) SetRouter(router *Router) {
+func (s *server) SetRouter(router *Router) {
 	s.router = router
 }
 
-func initSockAddr(addr string, port int) *unix.SockaddrInet4 {
-	tmpAddr := net.ParseIP(addr)
-	if tmpAddr == nil {
-		tmpAddr = net.IP{127, 0, 0, 1}
-	}
-	return &unix.SockaddrInet4{
-		Port: port,
-		Addr: [4]byte{tmpAddr[0], tmpAddr[1], tmpAddr[2], tmpAddr[3]},
-	}
-}
-
-func (s *data) SetSocketAddr(addr string, port int) {
-	s.server.addrIPv4 = initSockAddr(addr, port)
-}
-
-// Client ...
-type Client struct {
-	fd        int
-	stockaddr unix.Sockaddr
-}
-
-func (s *data) Send(h *Headers, fdClient int, addrClient unix.Sockaddr) error {
-	// * Sendmsg will send a message on the socket connection
-	return unix.Sendmsg(
-		fdClient,
-		h.ToByte(),
-		nil, addrClient, unix.MSG_DONTWAIT)
-}
-
-var activeFdSet unix.FdSet
-
-func (s *data) run() {
-	var tmpFdSet unix.FdSet
-
-	net.FDZero(&activeFdSet)
-	net.FDSet(s.server.fd, &activeFdSet)
-	fdAddr := net.FDAddrInit()
-
+func (s *server) run() {
 	for {
-		tmpFdSet = activeFdSet
-
-		// * Select will disable in the FdSet copy the FDs that
-		// are not yet ready to be read
-		err := unix.Select(unix.FD_SETSIZE, &tmpFdSet, nil, nil, nil)
+		c, err := s.socket.Accept()
 		if err != nil {
-			log.Fatal("Select ", err)
+			fmt.Println("Accept:", err)
+			continue
 		}
-		for fd := 0; fd < unix.FD_SETSIZE; fd++ {
-			if net.FDIsSet(fd, &tmpFdSet) {
-				if fd == s.server.fd {
-					// * Accept extracts the first connection request on the queue of
-					// pending connections for the listening socket, sockfd, creates a new
-					// connected socket, and returns a new file descriptor referring
-					// to that socket and the address of this socket.
-					newFD, sa, err := unix.Accept(s.server.fd)
-					if err != nil {
-						fmt.Println("Accept", err)
-						return
-					}
-					// == Add new connection fd == //
-					net.FDSet(newFD, &activeFdSet)
-					fdAddr.Set(newFD, sa)
-				} else {
-					msg := make([]byte, 1024)
-					// * Recvfrom will read the client fd and store the data in msg
-					// Do not forger to close the fd after
-					sizeMsg, _, err := unix.Recvfrom(fd, msg, 0)
-					if err != nil {
-						net.FDClr(fd, &activeFdSet)
-						fdAddr.Clr(fd)
-						unix.Close(fd)
-						continue
-					}
-					saFrom := fdAddr.Get(fd).(*unix.SockaddrInet4)
-					fmt.Printf("%d byte read from %d:%d on socket %d\n",
-						sizeMsg, saFrom.Addr, saFrom.Port, fd)
-					// == Parse recv message - HTTP Type == //
-					h := NewHeader()
-					h.SetVersion("1.1")
-					r := NewRequest()
-					r.RequestParse(string(msg))
-					fmt.Println("Message:", r.Method, r.URL)
-					route := s.router.routes[r.URL]
-					if route.Handler != nil {
-						route.Handler(h, r)
-					} else {
-						s.router.defaultHandler(h, r)
-					}
-					// * Sendmsg will send a message on the socket connection
-					err = s.Send(h, fd, fdAddr.Get(fd))
-					if err != nil {
-						fmt.Println("Send", err)
-					}
-					net.FDClr(fd, &activeFdSet)
-					fdAddr.Clr(fd)
-					unix.Close(fd)
-				}
+		fmt.Println("Connection accepted on port:", c.Fd)
+		go func(c net.Conn) {
+			msg := make([]byte, 1024)
+			_, err = c.Read(&msg)
+			if err != nil {
+				fmt.Println("Read:", err)
+				c.Close()
 			}
-		}
+
+			// == Parse recv message - HTTP Type == //
+			h := NewHeader()
+			h.SetVersion("1.1")
+			r := NewRequest()
+			r.RequestParse(string(msg))
+			fmt.Println("Message:", r.Method, r.URL)
+			route := s.router.routes[r.URL]
+			if route.Handler != nil {
+				route.Handler(h, r)
+			} else {
+				s.router.defaultHandler(h, r)
+			}
+			err = c.Write(h.ToByte())
+			if err != nil {
+				fmt.Println("Write:", err)
+				c.Close()
+			}
+			c.Close()
+		}(c)
 	}
 }
 
 // ListenAndServe will launch the server on a given port
 func ListenAndServe(port int, router *Router) {
-	n := data{}
-	n.SetRouter(router)
-	err := n.Socket()
+	s := server{}
+	s.SetRouter(router)
+	tcpSocket, err := net.Dial(port)
 	if err != nil {
-		log.Fatalln("Socket -", err)
+		fmt.Println(err)
+		return
 	}
-	n.SetSocketAddr("127.0.0.1", port)
-	// * Bind will link a socket file descriptor to a socket address
-	err = unix.Bind(n.server.fd, n.server.addrIPv4)
+	s.socket = tcpSocket
+	err = s.socket.Listen()
 	if err != nil {
-		log.Fatalln(fmt.Sprintf("Failed to bind to Addr: %v, Port: %d\nReason: %s", utils.ByteArrayJoin(n.server.addrIPv4.Addr[:], "."), n.server.addrIPv4.Port, err))
+		fmt.Printf("Listen: %s", err.Error())
+		return
 	}
-	fmt.Printf("Server: Bound to addr: %v, port: %d\n", utils.ByteArrayJoin(n.server.addrIPv4.Addr[:], "."), n.server.addrIPv4.Port)
-	err = n.Listen()
-	if err != nil {
-		log.Fatalln("Listen -", err)
-	}
-	n.run()
+	fmt.Printf("Server is running on %s\n", s.socket.GetAddr())
+	s.run()
 }
 
 // // func SetsockoptInet4Addr(fd, level, opt int, value [4]byte) error
